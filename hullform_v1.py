@@ -78,6 +78,7 @@ class HullForm(Geometry):
         self.generateMesh()
 
     def generateMesh(self):
+        tsStart = time.perf_counter()
 
         hmax=self.pdecks[0]
         #hmax=9.4
@@ -95,14 +96,23 @@ class HullForm(Geometry):
         self.wlinesPos = lines[0]  # positive y waterlines
         self.wlinesNeg = lines[1]  # negative y waerlines
         self.wlKeel = lines[2]  # keel waterline (one waterline)
-        self.mesh = self.genHullFormMeshPP(lines)
+        self.mesh = self.genHullFormMeshPP(lines,False)
+        #fvs = self.mesh.fv_indices().tolist()
+        #points = self.mesh.points().tolist()
+        #self.mesh2calcWL=self.getHullFormMesh2calcWl(fvs,points,6.24)
+        #self.mesh=self.mesh2calcWL
+        dtAll = time.perf_counter() - tsStart
+        print("Mesh generation time:", dtAll)
         pass
+
+    #proračun hidrostatike broda
 
     def getResults(self,h,seaDensity):
         tsStart = time.perf_counter()
         results = []
         fvs = self.mesh.fv_indices().tolist()
         points = self.mesh.points().tolist()
+        self.newLine = self.getHullFormMesh2calcWl(fvs, points, h)
         xmf = 50
         # h=9
         bcwl = self.getBasicDataUsingTrianglesProjectedToWaterline(h,xmf,fvs,points)
@@ -379,6 +389,39 @@ class HullForm(Geometry):
         # dodati Swet u izlaz
         return h, 2 * vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il
 
+    def getIntersectionPoints(self, p1,p2,p3,h, os):
+        ip1 = self.getIntersectionPoint(p1,p2,h, os)
+        ip2 = self.getIntersectionPoint(p1, p3, h, os)
+        ips = [ip1, ip2]
+        return ips
+
+    def getIntersectionPoint(self, p1,p2,h, os):
+        ip1=0
+        if os == 2:
+            ip1 = [(h-p2[2])/(p1[2]-p2[2])*(p1[0]-p2[0])+p2[0], (h-p2[2])/(p1[2]-p2[2])*(p1[1]-p2[1])+p2[1] ,h]
+        if os == 0:
+            ip1 = [h, (h-p1[0])/(p2[0]-p1[0])*(p2[1]-p1[1])+p1[1], (h-p1[0])/(p2[0]-p1[0])*(p2[2]-p1[2])+p1[2]]
+
+        return ip1
+
+    def calcArea2DTria(self,Ax,Ay,Bx,By,Cx,Cy):
+        area = 1 / 2 * (Ax * (By - Cy) + Bx * (Cy - Ay) + Cx * (Ay - By))
+        return abs(area)
+
+    def calcAreaTria3D(self,p1,p2,p3):
+        p1p2= np.subtract(p2,p1)
+        p1p3 = np.subtract(p3, p1)
+        u=np.cross(p1p2,p1p3)
+        return np.linalg.norm(u/2)
+
+    def TezisteTrokuta(self, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz):
+
+        Xcm = (Ax + Bx + Cx) / 3
+        Ycm = (Ay + By + Cy) / 3
+        Zcm = (Az + Bz + Cz) / 3
+
+        return Xcm, Ycm, Zcm
+
     def getIl(self,h, Xwl):
         mesh = self.mesh
         lpowl = []
@@ -503,14 +546,6 @@ class HullForm(Geometry):
         KBx = KBx / self.getVolume(h)
         return KBz, KBx
 
-    def TezisteTrokuta(self, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz):
-
-        Xcm = (Ax + Bx + Cx) / 3
-        Ycm = (Ay + By + Cy) / 3
-        Zcm = (Az + Bz + Cz) / 3
-
-        return Xcm, Ycm, Zcm
-
     def getXwl(self, h):
         mesh = self.mesh
         lpowl=[]
@@ -565,21 +600,6 @@ class HullForm(Geometry):
         Xwl = Xwl / self.getAwl(h)
         return Xwl
 
-    def getIntersectionPoints(self, p1,p2,p3,h, os):
-        ip1 = self.getIntersectionPoint(p1,p2,h, os)
-        ip2 = self.getIntersectionPoint(p1, p3, h, os)
-        ips = [ip1, ip2]
-        return ips
-
-    def getIntersectionPoint(self, p1,p2,h, os):
-        ip1=0
-        if os == 2:
-            ip1 = [(h-p2[2])/(p1[2]-p2[2])*(p1[0]-p2[0])+p2[0], (h-p2[2])/(p1[2]-p2[2])*(p1[1]-p2[1])+p2[1] ,h]
-        if os == 0:
-            ip1 = [h, (h-p1[0])/(p2[0]-p1[0])*(p2[1]-p1[1])+p1[1], (h-p1[0])/(p2[0]-p1[0])*(p2[2]-p1[2])+p1[2]]
-
-        return ip1
-
     def getAwl(self, hvl):
         mesh = self.mesh
         h = hvl
@@ -628,17 +648,6 @@ class HullForm(Geometry):
                 area = 0
             Awl = Awl + area
         return Awl
-
-    def calcArea2DTria(self,Ax,Ay,Bx,By,Cx,Cy):
-        area = 1 / 2 * (Ax * (By - Cy) + Bx * (Cy - Ay) + Cx * (Ay - By))
-        return abs(area)
-
-
-    def calcAreaTria3D(self,p1,p2,p3):
-        p1p2= np.subtract(p2,p1)
-        p1p3 = np.subtract(p3, p1)
-        u=np.cross(p1p2,p1p3)
-        return np.linalg.norm(u/2)
 
     def getVolume(self, h):
         mesh = self.mesh
@@ -749,17 +758,19 @@ class HullForm(Geometry):
 
         return mesh
 
-    def get_tria_for_calculation(self, fvs, points: np.ndarray, h):
-        new_points = points.tolist()
-        new_tria = []
+    def getHullFormMesh2calcWl(self,fvs,points,h):
+        intersectionPosWline=[]
+        intersectionNegWline=[]
 
-        lpbwl = []
-        lpowl = []
+        lpbwl=[]
+        lpowl=[]
         p = []
+        r = []
+        cgTriaMid = []
         for fh in fvs:  # facet handle
             p.clear()
             r.clear()
-
+            cgTriaMid.clear()
             lpowl.clear()
             lpbwl.clear()
             i = 0
@@ -768,48 +779,46 @@ class HullForm(Geometry):
                 p.append(points[vh])
                 if p[i][2] > h:
                     lpowl.append(i)
+
                 else:
                     lpbwl.append(i)
                 i = i + 1
 
-            #
-
-            if len(lpowl) == 0:
-                new_tria.append(fh)
-
-            if len(lpowl) == 1:
+            if len(lpowl)==1:
                 lip = self.getIntersectionPoints(p[lpowl[0]], p[lpbwl[0]], p[lpbwl[1]], h, 2)
-                n = len(new_points)
-                new_points.append(lip[0])
-                new_points.append(lip[1])
-                if lpowl[0]==1:
-                    fh_new = np.array([fh[lpbwl[0]], n, n+1])
-                    new_tria.append(fh_new)
-                    fh_new = np.array([fh[lpbwl[0]], n + 1, fh[lpbwl[1]]])
-                    new_tria.append(fh_new)
+                if lip[0][1]>=0 and lip[1][1]>=0:
+                    if len(intersectionPosWline)==1:
+                        intersectionPosWline[0]=np.array(lip[0])
+                    intersectionPosWline.append(np.array(lip[0]))
+                    intersectionPosWline.append(np.array(lip[1]))
+                if lip[0][1]<=0 and lip[1][1]<=0:
+                    if len(intersectionNegWline)==1:
+                        intersectionNegWline[0]=np.array(lip[0])
+                    intersectionNegWline.append(np.array(lip[0]))
+                    intersectionNegWline.append(np.array(lip[1]))
 
-                else:
-                    fh_new = np.array([fh[lpbwl[0]], fh[lpbwl[1]], n+1])
-                    new_tria.append(fh_new)
-                    fh_new = np.array([fh[lpbwl[0]], n+1,n])
-                    new_tria.append(fh_new)
+        print("Lenght",len(intersectionPosWline))
+        print("Intersection",intersectionPosWline)
+        #print("Lenght",len(intersectionNegWline))
+        #print("Intersection",intersectionNegWline)
+        wlines2calcWLPos=[]
+        wlines2calcWLNeg=[]
+        wlines2calcWLPos.append(intersectionPosWline)
+        wlines2calcWLNeg.append(intersectionNegWline)
+        for line in self.wlinesPos:
+            if line[0][2]<h:
+                wlines2calcWLPos.append(line)
+        for line in self.wlinesNeg:
+            if line[0][2]<h:
+                wlines2calcWLNeg.append(line)
+        #print("WlPos,WlNeg",len(wlines2calcWLPos))
+        #lines2calcWL=[wlines2calcWLPos,wlines2calcWLNeg,self.wlKeel]
+        #mesh2clacWL=self.genHullFormMeshPP(lines2calcWL,True)
+        #return mesh2clacWL
+        pass
 
-            if len(lpowl) == 2:
-                lip = self.getIntersectionPoints(p[lpbwl[0]], p[lp0wl[0]], p[lp0wl[1]], h, 2)
-                n = len(new_points)
-                new_points.append(lip[0])
-                new_points.append(lip[1])
-                if lpowl[0] == 1:
-                    fh_new = np.array([fh[lpbwl[0]], n+1, n])
-                    new_tria.append(fh_new)
 
-                else:
-                    fh_new = np.array([fh[lpbwl[0]], n, n + 1])
-                    new_tria.append(fh_new)
-
-        return np.array(new_tria), np.array(new_points)
-
-    def _genFaces(self,mesh:om.TriMesh,whs:list, doReverse:bool):
+    def _genFaces(self,mesh:om.TriMesh,whs:list, doReverse:bool,intersection:bool):
         nl=len(whs)
         npt=len(whs[0])
         for iL in range(1, nl):
@@ -822,16 +831,18 @@ class HullForm(Geometry):
                 else:
                     mesh.add_face(whs[iL][1], whs[iL][0], whs[iL - 1][0])
                 dip = 1
-            for ipL_1 in range(1,npt_iL_1):
-                ip = ipL_1+dip
-                if doReverse:
-                    mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip], whs[iL - 1][ipL_1])
-                    mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip - 1], whs[iL][ip])
-                else:
-                    mesh.add_face(whs[iL - 1][ipL_1-1],   whs[iL - 1][ipL_1],whs[iL ][ip])
-                    mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip],    whs[iL][ip-1])
+                for ipL_1 in range(1,npt_iL_1):
+                    ip = ipL_1+dip
+                    if doReverse:
+                        mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip], whs[iL - 1][ipL_1])
+                        mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip - 1], whs[iL][ip])
 
-    def genHullFormMeshPP(self, lines: list):
+                    else:
+                        mesh.add_face(whs[iL - 1][ipL_1-1],   whs[iL - 1][ipL_1],whs[iL ][ip])
+                        mesh.add_face(whs[iL - 1][ipL_1 - 1], whs[iL][ip],    whs[iL][ip-1])
+
+
+    def genHullFormMeshPP(self, lines: list,intersection:bool):
         mesh = om.TriMesh()
         wlinesPos = lines[0]  # positive y waterlines
         wlinesNeg = lines[1]  # negative y waerlines
@@ -859,10 +870,12 @@ class HullForm(Geometry):
             for p in wl:
                 whsi.append(mesh.add_vertex(p))
 
-        self._genFaces(mesh,whsPos,True)
-        self._genFaces(mesh, whsNeg,False)
+        self._genFaces(mesh,whsPos,True,intersection)
+        self._genFaces(mesh, whsNeg,False,intersection)
 
         return mesh
+
+
 
     def hullGen(self, shipdata: dict, pdecks: list, nump):
         # gs is the grid size of a cell, in pixels
