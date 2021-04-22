@@ -79,9 +79,6 @@ class HullForm(Geometry):
 
     def generateMesh(self):
 
-        hmax=self.pdecks[0]
-        #hmax=9.4
-        #wlPos=self.hfmq.genWLPositions(hmax, 0)
         transomTip = self.shipdata["draft_val"] * self.shipdata["td_val"]
         obligatoryWL= []
         for dh in self.pdecks:
@@ -90,7 +87,6 @@ class HullForm(Geometry):
         obligatoryWL.sort(reverse=True)
 
         wlPos = self.hfmq.genWLPositionsUsingObligatory(obligatoryWL)
-        #results = self.hullGen(self.shipdata, wlPos, self.hfmq.numPointsWLhalf)
         lines = self.hullGen(self.shipdata, wlPos, self.hfmq.numPointsWLhalf)
         self.wlinesPos = lines[0]  # positive y waterlines
         self.wlinesNeg = lines[1]  # negative y waerlines
@@ -98,13 +94,36 @@ class HullForm(Geometry):
         self.mesh = self.genHullFormMeshPP(lines)
         pass
 
+    def getResultsNew(self,h,seaDensity,fvs,points):
+        mesh2calcWl=self.get_tria_for_calculation(fvs,points,h)
+        fvs2calcWl=mesh2calcWl[0]
+        points2calcWl=mesh2calcWl[1]
+        xmf = self.shipdata["loa_val"]/2
+        #bcwl = self.getBasicDataUsingTrianglesProjectedToWaterlineNew(h,xmf,fvs2calcWl,points2calcWl)
+        #fvs=np.ndarray(fvs2calcWl)
+        #points=np.ndarray(points2calcWl)
+        bcwl=self.getBasicDataUsingTrianglesProjectedToWaterlineNew_v1(h,xmf,fvs2calcWl,points2calcWl)
+        h = bcwl[0]
+        volume = bcwl[1]
+        area = bcwl[2]
+        Xwl = bcwl[3]
+        KBz = bcwl[4]
+        KBx = bcwl[5]
+        Ib = bcwl[6]
+        Il = bcwl[7]
+        Lwl, Bwl = self.getLwlBwl(h, fvs2calcWl, points2calcWl)
+        mfarea = self.getMainFrameArea(xmf, h, fvs2calcWl, points2calcWl)
+        hsdata = self.getHydrostaticData(seaDensity, h, volume, area, Ib, Il, KBz, Lwl, 2 * Bwl, mfarea)
+        results= bcwl+hsdata
+        return results
+
+
     def getResults(self,h,seaDensity):
         tsStart = time.perf_counter()
         results = []
         fvs = self.mesh.fv_indices().tolist()
         points = self.mesh.points().tolist()
-        xmf = 50
-        # h=9
+        xmf = self.shipdata["loa_val"]/2
         bcwl = self.getBasicDataUsingTrianglesProjectedToWaterline(h,xmf,fvs,points)
         h = bcwl[0]
         volume = bcwl[1]
@@ -119,9 +138,14 @@ class HullForm(Geometry):
         hsdata = self.getHydrostaticData(seaDensity,h,volume,area,Ib,Il,KBz,Lwl,2*Bwl,mfarea)
         dtAll = time.perf_counter() - tsStart
         print("Hydrostatic results calc time:", dtAll)
+        resultsNew=self.getResultsNew(h,seaDensity,fvs,points)
+        dtAll = time.perf_counter() - tsStart-dtAll
+        print("Hydrostatic results calc timeNew:", dtAll)
         results = bcwl+hsdata
         print(results)
-        return results
+        print("results:",results)
+        print("resultsNew",resultsNew)
+        return resultsNew
 
     def getMainFrameArea(self,x,h,fvs,points):
         mfpoints = self.getSortedPointsOnAxisAlignedPlane(x, fvs, points, 0)
@@ -205,6 +229,158 @@ class HullForm(Geometry):
 
         Lwl = wlpoints[-1][0] - wlpoints[0][0]
         return Lwl, Bwl
+
+    def getBasicDataUsingTrianglesProjectedToWaterlineNew_v1(self,h,xmf,fvs,points):
+        num_tria=len(fvs)
+        fvs=np.array(fvs)
+        points=np.array(points)
+        Ib = np.zeros((num_tria))
+        Il = np.zeros((num_tria))
+        KBz = np.zeros((num_tria))
+        KBx = np.zeros((num_tria))
+        vol = np.zeros((num_tria))
+        areaXYPlane = np.zeros((num_tria))
+        area3D = np.zeros((num_tria))
+        vol1 = 0
+        Awl =np.zeros((num_tria))
+        Xwl = np.zeros((num_tria))
+        Swet = np.zeros((num_tria))
+
+        k_vec = np.zeros((3))
+        norm_vec = np.zeros((num_tria,3))
+        teziste = np.zeros((num_tria,3))
+
+        k_vec[2]=-1
+        norm_vec = self.calc_area_vector_all_tria_v1(fvs, points,True)
+        teziste= self.calc_area_vector_all_tria_v1(fvs, points,False)
+        #norm_vec = self.calc_area_vector_all_tria(fvs, points)
+
+
+        # area
+        areaXYPlane = np.dot(norm_vec, k_vec)
+        area3D = np.linalg.norm(norm_vec,axis=1)
+
+
+        # Area
+        Swet=area3D.sum()
+        Awl =areaXYPlane.sum()
+
+        # Volume
+        dh =h-teziste[:,2]
+        vol=areaXYPlane*dh
+        Vol=vol.sum()
+
+        # Xwl
+        Xwl = teziste[:, 0] * areaXYPlane
+        Xwl=Xwl.sum()/Awl
+
+
+        # Ib Il
+        Ib = teziste[:,1] ** 2 * areaXYPlane
+        Il = Il + (teziste[:,0] - Xwl) ** 2 * areaXYPlane
+        Ib=np.sum(Ib)
+        Il = np.sum(Il)
+
+        # Kbz, KBx
+        KBz =areaXYPlane * dh * (teziste[:,2] + dh / 2)
+        KBx =areaXYPlane * dh * (teziste[:,0])
+        KBz = KBz.sum()/Vol
+        KBx=KBx.sum()/Vol
+
+        return h, 2 * Vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il
+
+    def getBasicDataUsingTrianglesProjectedToWaterlineNew(self,h,xmf,fvs,points):
+
+        Ib = 0
+        Il=0
+        KBz = 0
+        KBx = 0
+        vol = 0
+        vol1 = 0
+        Awl = 0
+        Xwl = 0
+        Swet = 0
+        p=[]
+        r=[]
+        cgTriaMid = []
+        for fh in fvs:
+            p.clear()
+            r.clear()
+            cgTriaMid.clear()
+            for vh in fh:
+               p.append(points[vh])
+
+            #A
+            Ax = p[0][0]
+            Ay = p[0][1]
+            Az = p[0][2]
+            # B
+            Bx = p[1][0]
+            By = p[1][1]
+            Bz = p[1][2]
+            # C
+            Cx = p[2][0]
+            Cy = p[2][1]
+            Cz = p[2][2]
+
+            #numpy array
+            tria3D=np.array(p)
+            triaXYPlane=np.array(p)
+            triaXYPlane[:,2]=h
+            k_vec=np.array([0,0,-1])
+            norm_vec=self.getTriaVector(p[0], p[1], p[2])
+            teziste=self.TezisteTrokutaNew(p[0],p[1],p[2])
+
+
+            #areaXYPlane = self.calcArea2DTria(Ax, Ay, Bx, By, Cx, Cy)
+            areaXYPlane=self.calcAreaNew(triaXYPlane[0],triaXYPlane[1],triaXYPlane[2])
+            #area3D = self.calcAreaTria3D(p[0], p[1], p[2])
+            area3D=self.calcAreaNew(p[0], p[1], p[2])
+
+            # area
+            areaXYPlane = np.dot(norm_vec, k_vec)
+            area3D = np.linalg.norm(norm_vec)
+
+            #Area
+            Swet += area3D
+            Awl = Awl + areaXYPlane
+
+            # Volume
+            hA = h - Az
+            hB = h - Bz
+            hC = h - Cz
+            #vol = vol + 1 / 3 * areaXYPlane * (hA + hB + hC)
+            dh=h-teziste[2]
+            vol+=dh*areaXYPlane
+
+            # Ib Il
+            #r.append(self.TezisteTrokuta(Ax, Ay, h, Bx, By, h, Cx, Cy, h))
+            #Ib = Ib + r[0][1] ** 2 * areaXYPlane
+            Ib = Ib + teziste[1] ** 2 * areaXYPlane
+            Il = Il + (teziste[0] - xmf) ** 2 * areaXYPlane
+
+            # Kbz, KBx
+            #hsr = (Az + Bz + Cz) / 3
+            #cgTriaMid.append(self.TezisteTrokuta(Ax, Ay, (h - hsr), Bx, By, (h - hsr), Cx, Cy, (h - hsr)))
+            #KBz = KBz + areaXYPlane * (h - hsr) * (hsr + (h - hsr) / 2)
+            #KBx = KBx + areaXYPlane * (h - hsr) * (cgTriaMid[0][0])
+            KBz = KBz + areaXYPlane * dh * (teziste[2] + dh / 2)
+            KBx = KBx + areaXYPlane * dh * (teziste[0])
+
+            # Xwl
+            #Xwl = Xwl + r[0][0] * areaXYPlane
+            Xwl = Xwl + teziste[0] * areaXYPlane
+
+
+        Xwl = Xwl / Awl
+        #Il = float(self.getIl(h, Xwl))
+        #Il = Il + (teziste[0] - Xwl) ** 2 * areaXYPlane
+        Il=Il-(Xwl-xmf)**2*Awl
+        KBz = KBz / vol
+        KBx = KBx / vol
+
+        return h, 2 * vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il
+
 
     def getBasicDataUsingTrianglesProjectedToWaterline(self, h, x, fvs, points):
         mesh = self.mesh
@@ -503,6 +679,11 @@ class HullForm(Geometry):
         KBx = KBx / self.getVolume(h)
         return KBz, KBx
 
+    def TezisteTrokutaNew(self,p1,p2,p3):
+        tria=np.array([p1,p2,p3])
+        teziste=tria.sum(0)/3
+        return teziste
+
     def TezisteTrokuta(self, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz):
 
         Xcm = (Ax + Bx + Cx) / 3
@@ -633,6 +814,71 @@ class HullForm(Geometry):
         area = 1 / 2 * (Ax * (By - Cy) + Bx * (Cy - Ay) + Cx * (Ay - By))
         return abs(area)
 
+    def calc_area_vector_all_tria_v1(self,fvs:np.ndarray,points:np.ndarray,log:bool)->np.ndarray:
+        num_tria= len(fvs)
+        p1 = np.zeros((num_tria, 3))
+        p2 = np.zeros((num_tria, 3))
+        p3 = np.zeros((num_tria, 3))
+        i =0
+        for vt in fvs:
+            #print("vt",points[vt[0]])
+            p1[i] = points[vt[0]]
+            # p1[i,:] = points(vt[0])
+            p2[i] = points[vt[1]]
+            p3[i] = points[vt[2]]
+            i+=1
+        p1p2 = np.subtract(p2, p1)
+        p1p3 = np.subtract(p3, p1)
+        u = np.cross(p1p2, p1p3)
+        teziste=(p1+p2+p3)/3
+        if log:
+            result=u/2
+        else:
+            result=teziste
+        return result
+
+    def calc_area_vector_all_tria(self,fvs:np.ndarray,points:np.ndarray)->np.ndarray:
+        num_tria= len(fvs)
+        p1 = np.zeros((num_tria, 3))
+        p2 = np.zeros((num_tria, 3))
+        p3 = np.zeros((num_tria, 3))
+        i =0
+        for vt in fvs:
+            p1[i]= points(vt[0])
+            #p1[i,:] = points(vt[0])
+            p2[i] = points(vt[1])
+            p3[i] = points(vt[2])
+            i+=1
+        p1p2 = np.subtract(p2, p1)
+        p1p3 = np.subtract(p3, p1)
+        u = np.cross(p1p2, p1p3)
+        return u/2
+
+    def calc_area_vector_all_tria_2(self,fvs:np.ndarray,points:np.ndarray)->np.ndarray:
+        num_tria= len(fvs)
+        p = np.zeros((3,num_tria, 3))
+        i =0
+        for vt in fvs:
+            for j in range(3):
+                p[j,i] = points(vt[j])
+                #p[j, i,:] = points(vt[0])
+            i+=1
+        p1p2 = np.subtract(p[1,:], p[0,:])
+        p1p3 = np.subtract(p[2,:], p[0,:])
+        u = np.cross(p1p2, p1p3)
+        return u/2
+
+    def getTriaVector(self,p1,p2,p3):
+        p1p2 = np.subtract(p2, p1)
+        p1p3 = np.subtract(p3, p1)
+        u = np.cross(p1p2, p1p3)
+        return u/2
+
+    def calcAreaNew(self,p1,p2,p3):
+        p1p2 = np.subtract(p2, p1)
+        p1p3 = np.subtract(p3, p1)
+        u = np.cross(p1p2, p1p3)
+        return np.linalg.norm(u / 2)
 
     def calcAreaTria3D(self,p1,p2,p3):
         p1p2= np.subtract(p2,p1)
@@ -749,8 +995,8 @@ class HullForm(Geometry):
 
         return mesh
 
-    def get_tria_for_calculation(self, fvs, points: np.ndarray, h):
-        new_points = points.tolist()
+    def get_tria_for_calculation(self, fvs, points, h):
+        new_points = points
         new_tria = []
 
         lpbwl = []
@@ -758,8 +1004,6 @@ class HullForm(Geometry):
         p = []
         for fh in fvs:  # facet handle
             p.clear()
-            r.clear()
-
             lpowl.clear()
             lpbwl.clear()
             i = 0
@@ -795,7 +1039,7 @@ class HullForm(Geometry):
                     new_tria.append(fh_new)
 
             if len(lpowl) == 2:
-                lip = self.getIntersectionPoints(p[lpbwl[0]], p[lp0wl[0]], p[lp0wl[1]], h, 2)
+                lip = self.getIntersectionPoints(p[lpbwl[0]], p[lpowl[0]], p[lpowl[1]], h, 2)
                 n = len(new_points)
                 new_points.append(lip[0])
                 new_points.append(lip[1])
@@ -807,7 +1051,7 @@ class HullForm(Geometry):
                     fh_new = np.array([fh[lpbwl[0]], n, n + 1])
                     new_tria.append(fh_new)
 
-        return np.array(new_tria), np.array(new_points)
+        return new_tria, new_points
 
     def _genFaces(self,mesh:om.TriMesh,whs:list, doReverse:bool):
         nl=len(whs)
