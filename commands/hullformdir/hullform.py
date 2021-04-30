@@ -158,9 +158,9 @@ class HullForm(Geometry):
         KBx = bcwl[5]
         Ib = bcwl[6]
         Il = bcwl[7]
-        cg=bcwl[8]
+        """cg=bcwl[8]
         arEr = bcwl[9]
-        kbxEr=bcwl[10]
+        kbxEr=bcwl[10]"""
         #arEr=0
         Lwl,Bwl = self.getLwlBwl(h,fvs,points)
         mfarea = self.getMainFrameArea(xmf, h, fvs, points)
@@ -170,9 +170,9 @@ class HullForm(Geometry):
         dtAll = time.perf_counter() - tsStart
         print("Hydrostatic results calc time:", dtAll)
         #cg=bcwl[8]
-        """cg=0
+        cg=0
         arEr=0
-        kbxEr=0"""
+        kbxEr=0
         resultsNew=self.getResultsNew(h,seaDensity,fvs,points,cg,arEr,kbxEr)
         #resultsNew=self.getResultsNew(h,seaDensity,fvs,points)
         dtAll = time.perf_counter() - tsStart-dtAll
@@ -358,8 +358,8 @@ class HullForm(Geometry):
         kbx=KBx
         KBz = float(KBz.sum()/Vol)
         KBx=float(KBx.sum()/Vol)
-        KbxEr=kbxEr.sum()/Vol
-        isclosekbx = np.isclose(kbxEr, kbx)
+        #KbxEr=kbxEr.sum()/Vol
+        """isclosekbx = np.isclose(kbxEr, kbx)
         ar2=ar.sum()
         ib=cg[:,1]**2*ar
         allCG=np.allclose(cg,teziste)
@@ -367,7 +367,7 @@ class HullForm(Geometry):
         isIb=np.isclose(ib,Ib)
         isclose=np.isclose(cg, teziste)
         allAr = np.allclose(ar, areaXYPlane)
-        iscloseAr = np.isclose(ar, areaXYPlane)
+        iscloseAr = np.isclose(ar, areaXYPlane)"""
         return h, 2 * Vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il #,teziste
 
 
