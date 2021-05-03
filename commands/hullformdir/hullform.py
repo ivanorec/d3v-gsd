@@ -95,19 +95,29 @@ class HullForm(Geometry):
         self.mesh = self.genHullFormMeshPP(lines)
         pass
 
-    """def Test(self,h,xmf,fvs,points):
+    def TestMframeArea(self,h,xmf,fvs,points):
 
         mesh2calcWl = self.get_tria_for_calculation(fvs, points, h)
         fvs2calcWl = mesh2calcWl[0]
         points2calcWl = mesh2calcWl[1]
-        mf1=self.getMainFrameArea(h,xmf,fvs,points)
-        mfar1=mf1[0]
-        mfarl1=mf1[1]
-        mf2=self.getMainFrameArea(xmf, h, fvs2calcWl, points2calcWl)
-        mfar2 = mf2[0]
-        mfarl2 = mf2[1]
-        isCloseMfAr=np.isclose(mfar1,mfar2)
-        return mf1,mf2"""
+        mfEr=self.getMainFrameAreaTest(xmf,h,fvs,points)
+        mfEr0=mfEr[0]
+        mfEr1 = mfEr[1]
+        mfEr2 = mfEr[2]
+        mfpointsEr = np.array(self.getSortedPointsOnAxisAlignedPlane(xmf, fvs, points, 0))
+        #mfar1=mf1[0]
+        #mfarl1=mf1[1]
+        mf2=self.getMainFrameAreaTest(xmf, h, fvs2calcWl, points2calcWl)
+        mf20 = mf2[0]
+        mf21 = mf2[1]
+        mf22 = mf2[2]
+        mfpoints2 = np.array(self.getSortedPointsOnAxisAlignedPlaneNew(xmf, fvs2calcWl, points2calcWl, 0))
+        #mfpoints2=np.append(mfpoints2,[0,0])
+        #iscloseMfpoints=np.isclose(mfpointsEr,mfpoints2)
+        #mfar2 = mf2[0]
+        #mfarl2 = mf2[1]
+        #isCloseMfAr=np.isclose(mfar1,mfar2)
+        return mfEr,mf2
 
 
     def getResultsNew(self,h,seaDensity,fvs,points,cg,arEr,kbxEr):
@@ -147,7 +157,7 @@ class HullForm(Geometry):
         points = self.mesh.points().tolist()
         dtAll=0
         xmf = self.shipdata["loa_val"]/2
-        #test = self.Test(h, xmf, fvs, points)
+        test = self.TestMframeArea(h, xmf, fvs, points)
         xmf = self.shipdata["loa_val"]/2
         bcwl = self.getBasicDataUsingTrianglesProjectedToWaterline(h,xmf,fvs,points)
         h = bcwl[0]
@@ -200,6 +210,30 @@ class HullForm(Geometry):
         #results=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
         return results
 
+    def getMainFrameAreaTest(self,x,h,fvs,points):
+        mfpoints = self.getSortedPointsOnAxisAlignedPlane(x, fvs, points, 0)
+        mfa=[]
+        area=0
+        a = len(mfpoints)
+        for i in range(0,a-2,1):
+                h1 = mfpoints[i][2]
+                h2 = mfpoints[i+2][2]
+                b1 = mfpoints[i][1]
+                b2 = mfpoints[i+2][1]
+                if h1<=h and h2<=h:
+                    area = area + 1/2*abs(h2-h1)*(abs(b1)+abs(b2))
+                    mfa.append(1/2*abs(h2-h1)*(abs(b1)+abs(b2)))
+                if h2>h and h1<h:
+                    point = self.getIntersectionPoint(mfpoints[i+2],mfpoints[i],h,2)
+                    H2 = point[2]
+                    B2=point[1]
+                    area = area + 1/2*abs(H2-h1)*(abs(b1)+abs(B2))
+                    mfa.append(1 / 2 * abs(H2 - h1) * (abs(b1) + abs(B2)))
+
+        return area ,np.array(mfa),mfpoints
+
+
+
     def getMainFrameArea(self,x,h,fvs,points):
         mfpoints = self.getSortedPointsOnAxisAlignedPlane(x, fvs, points, 0)
         mfa=[]
@@ -221,6 +255,54 @@ class HullForm(Geometry):
 
         return area #,np.array(mfa)
 
+    def getSortedPointsOnAxisAlignedPlaneNew(self, x, fvs, points, os):
+        mfpoints = []
+        lpr = []
+        lpl = []
+        #index=[]
+        i=0
+        for fv in fvs:
+            lpr.clear()
+            lpl.clear()
+            for iv in fv:
+                p = points[iv]
+                #index.append(iv)
+                if p[os] < x:
+                    lpl.append(iv)
+                elif p[os] > x:
+                    lpr.append(iv)
+                else:
+                    if len(mfpoints)<1:
+                        mfpoints.append(p)
+                        i=+1
+                    elif p!=mfpoints[i - 1]:
+                        mfpoints.append(p)
+                        i = +1
+
+            if len(lpl) > 0 and len(lpr) > 0:
+                if len(lpl) < len(lpr):
+                    p1=self.getIntersectionPoint(points[lpl[0]], points[lpr[0]], x, os)
+                    p2=self.getIntersectionPoint(points[lpl[0]], points[lpr[1]], x, os)
+                    mfpoints.append(self.getIntersectionPoint(points[lpl[0]], points[lpr[0]], x, os))
+                    mfpoints.append(self.getIntersectionPoint(points[lpl[0]], points[lpr[1]], x, os))
+                elif len(lpl) > len(lpr):
+                    mfpoints.append(self.getIntersectionPoint(points[lpl[0]], points[lpr[0]], x, os))
+                    mfpoints.append(self.getIntersectionPoint(points[lpl[1]], points[lpr[0]], x, os))
+                else:
+                    mfpoints.append(self.getIntersectionPoint(points[lpl[0]], points[lpr[0]], x, os))
+                pass
+
+        # mfpoints=[[0,1,1],[0,2,21],[1,1,2],[10,0,0]]
+
+        import itertools
+        mfpoints.sort()
+        mftemp = list(mfpoints for mfpoints, _ in itertools.groupby(mfpoints))
+        mfpoints = mftemp
+
+        mfpoints = sorted(mfpoints, key=lambda p: p[2])
+
+        return mfpoints
+
     def getSortedPointsOnAxisAlignedPlane(self, x, fvs, points, os):
         mfpoints=[]
         lpr = []
@@ -235,7 +317,7 @@ class HullForm(Geometry):
                 elif p[os] > x:
                     lpr.append(iv)
                 else:
-                    mfpoints.append(p)
+                        mfpoints.append(p)
 
             if len(lpl)>0 and len(lpr) > 0:
                 if len(lpl) < len(lpr):
@@ -257,6 +339,7 @@ class HullForm(Geometry):
         mfpoints = mftemp
 
         mfpoints = sorted(mfpoints, key=lambda p: p[2])
+
         return mfpoints
 
     def getHydrostaticData(self,seaDensity,h,volume,area,Ib, Il, KBz,Lwl,Bwl,mfarea):
