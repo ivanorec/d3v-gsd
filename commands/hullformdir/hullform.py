@@ -9,6 +9,8 @@ import time
 from iohandlers import IOHandler
 from signals import Signals
 from geometry import Geometry
+
+
 from typing import Set,Dict,List
 
 # import matplotlib.pyplot as plt
@@ -103,12 +105,9 @@ class HullForm(Geometry):
         mesh2calcWl=self.get_tria_for_calculation(fvs,points,h)
         fvs2calcWl=mesh2calcWl[0]
         points2calcWl=mesh2calcWl[1]
-        print("num_triuk",len(fvs))
-        print("num_tria",len(fvs2calcWl))
         xmf = self.shipdata["loa_val"]/2
         tMesh=time.perf_counter()
         t1=tMesh-tsStart
-        print("Hydrostatic results calc timeMesh:", tMesh-tsStart)
 
         bcwl=self.getBasicDataUsingTrianglesProjectedToWaterline(h,xmf,fvs2calcWl,points2calcWl)
         h = bcwl[0]
@@ -119,19 +118,25 @@ class HullForm(Geometry):
         KBx = bcwl[5]
         Ib = bcwl[6]
         Il = bcwl[7]
+        #Swet = bcwl[8]
+        #print("Swet:",Swet)
         tBcwl = time.perf_counter()
         t2=tBcwl-tMesh
-        print("Hydrostatic results calc timeBCWL:", tBcwl-tMesh)
         Lwl, Bwl = self.getLwlBwl(h, fvs2calcWl, points2calcWl)
         mfarea = self.getMainFrameArea(xmf, h, fvs2calcWl, points2calcWl)
         hsdata = self.getHydrostaticData(seaDensity, h, volume, area, Ib, Il, KBz, Lwl, 2 * Bwl, mfarea)
 
         results= bcwl+hsdata
         tHSdata = time.perf_counter()
+        dtAll = tHSdata - tsStart
         t3=tHSdata-tBcwl
-        print("Hydrostatic results calc timeHSdata:", tHSdata-tBcwl)
-        dtAll = time.perf_counter() - tsStart
-        print("Hydrostatic results calc time:", dtAll)
+        """print("num_triuk", len(fvs))
+        print("num_tria", len(fvs2calcWl))
+        print("Hydrostatic results calc timeMesh:", t1)
+        print("Hydrostatic results calc timeBCWL:", t2)
+        print("Hydrostatic results calc timeHSdata:", t3)
+
+        print("Hydrostatic results calc time:", dtAll)"""
         timeuk=t1,t2,t3,dtAll
         print("time:",timeuk)
         print("Results:",results)
@@ -157,7 +162,7 @@ class HullForm(Geometry):
                     area = area + 1/2*abs(H2-h1)*(abs(b1)+abs(b2))
                     #mfa.append(1 / 2 * abs(h2 - h1) * (abs(b1) + abs(b2)))
 
-        return area #,np.array(mfa)
+        return 2*area #,np.array(mfa)
 
     def getLwlBwl(self, h, fvs, points):
         wlpoints = self.getSortedPointsOnAxisAlignedPlane(h, fvs, points, 2)
@@ -263,7 +268,7 @@ class HullForm(Geometry):
         KBz = float(KBz.sum()/Vol)
         KBx=float(KBx.sum()/Vol)
 
-        return h, 2 * Vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il
+        return h, 2 * Vol, 2 * Awl, Xwl, KBz, KBx, 2 * Ib, 2 * Il #,Swet
 
     def getIntersectionPoints(self, p1,p2,p3,h, os):
         ip1 = self.getIntersectionPoint(p1,p2,h, os)
